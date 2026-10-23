@@ -249,6 +249,52 @@ module.exports = function (RED) {
       node.error(chalk.red("Client node error on: " + node.name + " error: " + stringify(err)));
     }
 
+    // Build a user certificate identity from the certificate and private key files.
+    // Returns null, after reporting the problem on the status and output 2, when the
+    // identity cannot be built. A missing or unreadable file must never throw here:
+    // connect_opcua_client is async and a throw would be an unhandled rejection that
+    // takes down the whole Node-RED process.
+    function create_user_certificate_identity() {
+      try {
+        if (!userCertificate || !fs.existsSync(userCertificate)) {
+          throw new Error("User certificate file not found: " + userCertificate);
+        }
+        if (!userPrivatekey || !fs.existsSync(userPrivatekey)) {
+          throw new Error("User private key file not found: " + userPrivatekey);
+        }
+        return {
+          certificateData: crypto_utils.readCertificate(userCertificate),
+          privateKey: crypto_utils.readPrivateKeyPEM(userPrivatekey),
+          type: opcua.UserTokenType.Certificate // User certificate
+        };
+      }
+      catch (err) {
+        node_error(err.message);
+        set_node_error_status_to("invalid certificate", err.message);
+        return null;
+      }
+    }
+
+    // Backstop for the connect callback so that nothing it throws, or rejects with,
+    // can escape as an uncaught exception.
+    function run_connect_callback(callback) {
+      const onFailure = (err) => {
+        connectingInFlight = false;
+        const message = err?.message || String(err);
+        node_error("Connect failed: " + message);
+        set_node_error_status_to("connection error", message);
+      };
+      try {
+        const result = callback();
+        if (result && typeof result.catch === "function") {
+          result.catch(onFailure);
+        }
+      }
+      catch (err) {
+        onFailure(err);
+      }
+    }
+
     function verbose_warn(logMessage) {
       if (opcuaEndpoint?.name && node.name) { // Optional name
         console.warn(chalk.cyan(`${opcuaEndpoint?.name}`) + chalk.yellow(":") + chalk.cyan(node.name) ? chalk.cyan(node.name) + chalk.yellow(': ') + chalk.cyan(logMessage) : chalk.yellow('OpcUaClientNode: ') + chalk.cyan(logMessage));
@@ -411,7 +457,7 @@ module.exports = function (RED) {
           node.items = items;
           set_node_status_to("no client");
           if (callback) {
-            callback();
+            run_connect_callback(callback);
           }
           return;
         }
@@ -439,7 +485,7 @@ module.exports = function (RED) {
       node.items = items;
       set_node_status_to("create client");
       if (callback) {
-        callback();
+        run_connect_callback(callback);
       }
     }
 
@@ -557,19 +603,13 @@ module.exports = function (RED) {
         }
       }
       else if (opcuaEndpoint?.usercert === true) {
-        if (!fs.existsSync(userCertificate)) {
-          node.error("User certificate file not found: " + userCertificate);
+        const certificateIdentity = create_user_certificate_identity();
+        if (!certificateIdentity) {
+          // Do not fall back to anonymous when a user certificate was asked for.
+          // The liveness watchdog retries, so a fixed file is picked up later.
+          return;
         }
-        const certificateData = crypto_utils.readCertificate(userCertificate);
-        if (!fs.existsSync(userPrivatekey)) {
-          node.error("User private key file not found: " + userPrivatekey);
-        }
-        const privateKey = crypto_utils.readPrivateKeyPEM(userPrivatekey);
-        userIdentity = {
-          certificateData,
-          privateKey,
-          type: opcua.UserTokenType.Certificate // User certificate
-        };
+        userIdentity = certificateIdentity;
       }
       else {
         verbose_warn(chalk.red("userIdentity is ANONYMOUS "));
