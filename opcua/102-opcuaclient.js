@@ -73,7 +73,10 @@ module.exports = function (RED) {
     connectionOption.securityMode = opcua.MessageSecurityMode[opcuaEndpoint.securityMode] || opcua.MessageSecurityMode.None;
     let userCertificate = opcuaEndpoint.userCertificate;
     let userPrivatekey = opcuaEndpoint.userPrivatekey;
-    
+    // Paths from the endpoint config node, used when a msg.OpcUaEndpoint does not set its own
+    const configuredUserCertificate = userCertificate;
+    const configuredUserPrivatekey = userPrivatekey;
+
     connectionOption.clientCertificateManager = createClientCertificateManager();
 
     if (node.certificate === "l" && node.localfile) {
@@ -260,6 +263,14 @@ module.exports = function (RED) {
         set_node_error_status_to("invalid certificate", err.message);
         return null;
       }
+    }
+
+    // A msg.OpcUaEndpoint can set the user certificate and private key file paths
+    // (userCertificate, userPrivatekey). Paths it leaves out fall back to the ones
+    // configured on the endpoint node.
+    function apply_user_certificate_paths(endpoint) {
+      userCertificate = endpoint?.userCertificate || configuredUserCertificate;
+      userPrivatekey = endpoint?.userPrivatekey || configuredUserPrivatekey;
     }
 
     // Backstop for the connect callback so that nothing it throws, or rejects with,
@@ -1242,6 +1253,7 @@ module.exports = function (RED) {
         }
         opcuaEndpoint = {}; // Clear
         opcuaEndpoint = msg.OpcUaEndpoint; // Check all parameters!
+        apply_user_certificate_paths(opcuaEndpoint);
         connectionOption.securityPolicy = opcua.SecurityPolicy[opcuaEndpoint?.securityPolicy]; // || opcua.SecurityPolicy.None;
         connectionOption.securityMode = opcua.MessageSecurityMode[opcuaEndpoint?.securityMode]; // || opcua.MessageSecurityMode.None;
         verbose_log("NEW connectionOption security parameters, policy: " + connectionOption.securityPolicy + " mode: " + connectionOption.securityMode);
@@ -2763,6 +2775,7 @@ module.exports = function (RED) {
           node.client.removeListener("start_reconnection", reconnection);
         }
         opcuaEndpoint = msg.OpcUaEndpoint; // Use global variable! Check all parameters!
+        apply_user_certificate_paths(opcuaEndpoint);
         connectionOption.securityPolicy = opcua.SecurityPolicy[opcuaEndpoint?.securityPolicy]; // || opcua.SecurityPolicy.None;
         connectionOption.securityMode = opcua.MessageSecurityMode[opcuaEndpoint?.securityMode]; // || opcua.MessageSecurityMode.None;
         verbose_log("NEW connectionOption security parameters, policy: " + connectionOption.securityPolicy + " mode: " + connectionOption.securityMode);
