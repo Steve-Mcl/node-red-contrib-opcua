@@ -149,23 +149,10 @@ module.exports = function (RED) {
       };
       verbose_log(chalk.green("Using UserName & password: ") + chalk.cyan(JSON.stringify(userIdentity)));
     }
-    else if (opcuaEndpoint.usercert === true) {
-      if (!fs.existsSync(userCertificate)) {
-        node.error("User certificate file not found: " + userCertificate);
-      }
-      const certificateData = crypto_utils.readCertificate(userCertificate);
-
-      if (!fs.existsSync(userPrivatekey)) {
-        node.error("User private key file not found: " + userPrivatekey);
-      }
-      const privateKey = crypto_utils.readPrivateKeyPEM(userPrivatekey);
-      userIdentity = {
-        certificateData,
-        privateKey,
-        type: opcua.UserTokenType.Certificate // User certificate
-      };
-    }
     else {
+      // A user certificate identity is not built here. connect_opcua_client builds
+      // it from the certificate files each time it connects, so the files only need
+      // to exist when connecting, not when the node is deployed.
       userIdentity = { type: opcua.UserTokenType.Anonymous };
     }
 
